@@ -1,0 +1,76 @@
+import threading, argparse
+from git import Repo
+from pathlib import Path
+
+
+def rel(path: Path) -> str:
+    return path.relative_to(Path.cwd()).as_posix()
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(
+        prog="git-clone",
+        description=(
+            "Clone a repository into a new directory.\n\nA 'mirror' clone is similar to a bare clone, but it also copies all refs (including remote-tracking branches and notes) and sets up remote configuration so that 'git fetch' and 'git push' will update all refs. This is useful for maintaining a full backup or mirror of another repository."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument("--branch", "-b", metavar="NAME", help="Checkout <NAME> branch after cloning instead of the remote's HEAD.")
+    parser.add_argument("repository", help="The (possibly remote) repository to clone.")
+    parser.add_argument("directory", nargs="?", help="Optional directory to clone into (defaults to the repo name).")
+    parser.add_argument("--mirror-cache-dir", help="Checkout <NAME> branch after cloning instead of the remote's HEAD.")
+    return parser.parse_args()
+
+
+def mirror_clone(repo_name: str, repo_url: str, mirror_dir: Path, clone_dir: Path = Path.cwd(), sha: str = ""):
+    mirror_repo: Path = mirror_dir / (repo_name + ".git")
+    repo_path = clone_dir
+
+    if mirror_repo.exists():
+        print(f"Fetching latest in {mirror_repo.as_posix()}")
+        Repo(mirror_repo).remotes.origin.fetch(prune=True)
+    else:
+        print(f"Mirror cloning {mirror_repo.as_posix()}")
+        Repo.clone_from(repo_url, mirror_repo, mirror=True)
+
+    print(f"Cloning {repo_path.as_posix()} from {mirror_repo.as_posix()}")
+    repo = Repo.clone_from(repo_url, repo_path, reference=mirror_repo)
+
+    if sha:
+        print(f"Checking out {sha}")
+        repo.git.checkout(sha)
+
+    if repo.submodules:
+        threads: list[threading.Thread] = []
+        for submodule in repo.submodules:
+            name = Path(submodule.path).name
+            url = submodule.url
+            sub_sha = submodule.hexsha
+            dest = Path(repo_path / Path(submodule.path))
+
+            t = threading.Thread(target=mirror_clone, args=(name, url, mirror_dir, dest, sub_sha))
+            t.start()
+            threads.append(t)
+
+        for t in threads:
+            t.join()
+
+
+def main():
+    args = parse_args()
+
+    REPO_NAME = args.repository
+    if args.directory is not None:
+        dest_dir = Path(args.directory)
+    else:
+        dest_dir = Path.cwd() / REPO_NAME
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    MIRRORS = Path.home() / ".mirror-clones"
+    BRANCH = args.branch or ""
+
+    mirror_clone(REPO_NAME, f"git@github.com:fordaj/{REPO_NAME}.git", MIRRORS, dest_dir, sha=BRANCH)
+    print(f"Cloned {(dest_dir).as_posix()}")
+
+
+if __name__ == "__main__":
+    main()

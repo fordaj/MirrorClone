@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+ 
+[project]
+name = "mirror-clone"
+version = "0.1.0"
+description = "Tool to mirror and clone repos with submodules"
+authors = [{ name="Andrew Ford", email="your@email.com"}]
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = [
+    "GitPython>=3.1"
+]
+ 
+[project.scripts]
+mirror-clone = "mirror_clone.cli:main"
