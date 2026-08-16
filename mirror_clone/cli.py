@@ -1,6 +1,7 @@
 import threading, argparse
 from git import Repo
 from pathlib import Path
+from pathlib import PurePosixPath
 
 
 def rel(path: Path) -> str:
@@ -59,16 +60,22 @@ def mirror_clone(repo_name: str, repo_url: str, mirror_dir: Path, clone_dir: Pat
 def main():
     args = parse_args()
 
-    REPO_NAME = args.repository
+    url = args.repository
+    # Get repo name from URL
+    REPO_NAME = PurePosixPath(url.rstrip("/")).name
+    if REPO_NAME.endswith(".git"):
+        REPO_NAME = REPO_NAME[:-4]
+
+    # Parse directory or default to CWD
     if args.directory is not None:
         dest_dir = Path(args.directory)
     else:
         dest_dir = Path.cwd() / REPO_NAME
     dest_dir.mkdir(parents=True, exist_ok=True)
-    MIRRORS = Path.home() / ".mirror-clones"
+    MIRRORS = Path.home() / ".mirror-clones" # TODO make this an arg
     BRANCH = args.branch or ""
 
-    mirror_clone(REPO_NAME, f"git@github.com:fordaj/{REPO_NAME}.git", MIRRORS, dest_dir, sha=BRANCH)
+    mirror_clone(REPO_NAME, url, MIRRORS, dest_dir, sha=BRANCH)
     print(f"Cloned {(dest_dir).as_posix()}")
 
 
