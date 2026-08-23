@@ -1,7 +1,9 @@
 import threading, argparse
 from git import Repo
+from git.exc import GitCommandError
 from pathlib import Path
 from pathlib import PurePosixPath
+from concurrent.futures import ThreadPoolExecutor
 
 
 def rel(path: Path) -> str:
@@ -24,43 +26,55 @@ def parse_args():
 
 
 def mirror_clone(repo_name: str, repo_url: str, mirror_dir: Path, clone_dir: Path = Path.cwd(), sha: str = ""):
-    mirror_repo: Path = mirror_dir / (repo_name + ".git")
-    repo_path = clone_dir
+    try:
+        mirror_repo: Path = mirror_dir / (repo_name + ".git")
+        repo_path = clone_dir
 
-    if mirror_repo.exists():
-        print(f"Fetching latest in {mirror_repo.as_posix()}")
-        Repo(mirror_repo).remotes.origin.fetch(prune=True)
-    else:
-        print(f"Mirror cloning {mirror_repo.as_posix()}")
-        Repo.clone_from(repo_url, mirror_repo, mirror=True)
+        if mirror_repo.exists():
+            print(f"Fetching latest in {mirror_repo.as_posix()}")
+            Repo(mirror_repo).remotes.origin.fetch(prune=True)
+        else:
+            print(f"Mirror cloning {mirror_repo.as_posix()}")
+            Repo.clone_from(repo_url, mirror_repo, mirror=True)
 
-    print(f"Cloning {repo_path.as_posix()} from {mirror_repo.as_posix()}")
-    repo = Repo.clone_from(repo_url, repo_path, reference=mirror_repo)
+        print(f"Cloning {repo_path.as_posix()} from {mirror_repo.as_posix()}")
+        repo = Repo.clone_from(repo_url, repo_path, reference=mirror_repo)
 
-    if sha:
-        print(f"Checking out {sha}")
-        repo.git.checkout(sha)
+        if sha:
+            print(f"Checking out {sha}")
+            repo.git.checkout(sha)
 
-    if repo.submodules:
-        threads: list[threading.Thread] = []
-        for submodule in repo.submodules:
-            name = Path(submodule.path).name
-            url = submodule.url
-            sub_sha = submodule.hexsha
-            dest = Path(repo_path / Path(submodule.path))
+        if repo.submodules:
+            with ThreadPoolExecutor(max_workers=len(repo.submodules)) as executor:
+                futures = []
 
-            t = threading.Thread(target=mirror_clone, args=(name, url, mirror_dir, dest, sub_sha))
-            t.start()
-            threads.append(t)
+                for submodule in repo.submodules:
+                    name = Path(submodule.path).name
+                    url = submodule.url
+                    sub_sha = submodule.hexsha
+                    dest = repo_path / Path(submodule.path)
 
-        for t in threads:
-            t.join()
+                    futures.append(
+                        executor.submit(
+                            mirror_clone,
+                            name,
+                            url,
+                            mirror_dir,
+                            dest,
+                            sub_sha,
+                        )
+                    )
 
+                for future in futures:
+                    future.result()
+    except GitCommandError:
+        print("\033[31mAn error occurred while running a git command:\033[0m")
+        raise
 
 def main():
     args = parse_args()
 
-    url = args.repository
+    url:str = args.repository
     # Get repo name from URL
     REPO_NAME = PurePosixPath(url.rstrip("/")).name
     if REPO_NAME.endswith(".git"):
