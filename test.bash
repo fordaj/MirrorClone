@@ -166,6 +166,7 @@ elif command -v shellcheck >/dev/null 2>&1; then
 		"$SCRIPT_DIR/build.bash"
 		"$SCRIPT_DIR/release.bash"
 		"$SCRIPT_DIR/test.bash"
+		"$SCRIPT_DIR/run.bash"
 		"$SCRIPT_DIR/scripts/entry.sh"
 		"$SCRIPT_DIR/scripts/env.sh"
 		"$SCRIPT_DIR/scripts/version.bash"

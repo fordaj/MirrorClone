@@ -71,6 +71,25 @@ mirror-clone --branch "main" "git@github.com:fordaj/AirFrame.git" "/c/Path/To/Di
 The cache directory can also be set with the `MIRROR_CLONE_MIRROR_CACHE_DIR`
 environment variable.
 
+## Running the built binary
+
+`run.bash` runs the binary that was built for the current machine. The
+platform is resolved with the environment cascade (`scripts/env.sh`), the same
+way the bundled tools are resolved, and every argument is passed straight to
+the binary:
+
+```bash
+./run.bash --branch main git@github.com:fordaj/AirFrame.git
+./run.bash --help
+DEBUG=true ./run.bash --help        # runs the debug build
+```
+
+The binary is looked up in this order:
+
+1. `$MIRROR_CLONE_BIN`
+2. `dist/<platform>/mirror-clone[.exe]` (release build)
+3. `dist/debug/<platform>/mirror-clone[.exe]` (`DEBUG=true`)
+
 ## Building from source
 
 The build scripts use the bundled [logamuffin](https://github.com/fordaj/logamuffin)
