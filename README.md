@@ -3,9 +3,18 @@
 Supports cloning repos and submodules using a cache of mirrors for performance.
  
 ## Installation
- 
+
+Build from source with Go (1.22+):
+
 ```bash
-pip install git+ssh://git@github.com/fordaj/MirrorClone.git
+./build.bash
+# binaries are written to ./dist/
+```
+
+Or build a single binary:
+
+```bash
+go build -o mirror-clone ./cmd/mirror-clone
 ```
  
 ## Usage
