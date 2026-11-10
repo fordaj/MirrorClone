@@ -1,0 +1,14 @@
+[project]
+name = "logamuffin-tools"
+version = "0.1.0"
+description = "Tooling-only project for logamuffin formatting (formattington)"
+requires-python = ">=3.14"
+dependencies = [
+    # Pinned to a formattington commit (no PyPI release exists yet).
+    # To bump: update the SHA below, then run `uv lock` and `uv sync`.
+    "formattington @ git+https://github.com/fordaj/formattington.git@62680e3a5e5ae7cd2c78450fda536055574c591b",
+]
+
+# This project holds formatting tooling only; it is not a published package.
+[tool.uv]
+package = false

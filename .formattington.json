@@ -1,0 +1,8 @@
+{
+  "commands": [
+    ["prettier"],
+    ["clang-format"],
+    ["shfmt", "-i", "4"],
+    ["shfmt", "-i", "4", "tools/sources.sh"]
+  ]
+}
