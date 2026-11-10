@@ -58,15 +58,15 @@ mirror-clone --branch "main" "git@github.com:fordaj/AirFrame.git" "/c/Path/To/Di
 
 ### Options
 
-| Option                   | Description                                                        |
-| ------------------------ | ------------------------------------------------------------------ |
-| `-b`, `--branch NAME`    | Check out `NAME` after cloning instead of the remote HEAD.          |
-| `--mirror-cache-dir DIR` | Directory of the mirror cache (default: `~/.mirror-clones`).         |
-| `-j`, `--jobs N`         | Maximum number of submodules cloned in parallel.                    |
-| `--log-level LEVEL`      | Minimum severity printed: `error`, `warn`, `info`, `debug`.         |
-| `-q`, `--quiet`          | Same as `--log-level error`.                                        |
-| `-v`, `--version`        | Print the version and exit.                                         |
-| `-h`, `--help`           | Print the usage and exit.                                           |
+| Option                   | Description                                                  |
+| ------------------------ | ------------------------------------------------------------ |
+| `-b`, `--branch NAME`    | Check out `NAME` after cloning instead of the remote HEAD.   |
+| `--mirror-cache-dir DIR` | Directory of the mirror cache (default: `~/.mirror-clones`). |
+| `-j`, `--jobs N`         | Maximum number of submodules cloned in parallel.             |
+| `--log-level LEVEL`      | Minimum severity printed: `error`, `warn`, `info`, `debug`.  |
+| `-q`, `--quiet`          | Same as `--log-level error`.                                 |
+| `-v`, `--version`        | Print the version and exit.                                  |
+| `-h`, `--help`           | Print the usage and exit.                                    |
 
 The cache directory can also be set with the `MIRROR_CLONE_MIRROR_CACHE_DIR`
 environment variable.
@@ -108,10 +108,52 @@ builds go to `dist/debug/<platform>/`.
 
 `DEBUG=true` is the same as `--debug`.
 
+## Formatting
+
+The sources are formatted with [formattington](https://github.com/fordaj/formattington),
+which drives the formatters of the project from the configuration in
+`.formattington.json`:
+
+| Formatter   | Files                        |
+| ----------- | ---------------------------- |
+| `prettier`  | Markdown, JSON               |
+| `shfmt`     | Shell scripts                |
+| `taplo`     | TOML                         |
+| `gofmt`     | Go sources                   |
+| `goimports` | Go sources and their imports |
+
+```bash
+./format.bash                # format every source of the repository
+./format.bash --check        # change nothing, fail when a file needs formatting
+./format.bash --dry-run      # print the differences, change nothing
+./format.bash --tool shfmt   # run a single formatter
+```
+
+Formattington is installed with [uv](https://docs.astral.sh/uv/). The
+environment is created automatically by `format.bash`, and can be set up by
+hand with:
+
+```bash
+uv sync
+```
+
+`uv.lock` is checked in, so `uv sync` installs exactly the locked versions.
+The formatters themselves have to be installed separately:
+
+- `prettier` and `shfmt` come from npm and the Go toolchain
+- `taplo` comes from its own releases
+- `gofmt` comes with the Go installation
+- `goimports` is installed with
+  `go install golang.org/x/tools/cmd/goimports@latest`
+
+The formatters run one after another, because `gofmt` and `goimports` write
+to the same files and would race against each other when they run
+concurrently. `format.bash --parallel` opts out of that.
+
 ## Testing
 
 ```bash
-./test.bash                 # gofmt, go vet, go build, go test, smoke test, shellcheck
+./test.bash                 # gofmt, go vet, go build, go test, smoke test, shellcheck, formatting
 ./test.bash --coverage      # also write coverage.out
 ```
 

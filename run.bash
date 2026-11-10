@@ -30,8 +30,8 @@ source "$SCRIPT_DIR/scripts/entry.sh"
 APP_NAME="mirror-clone"
 
 die() {
-	log ERROR "$*" || true
-	exit 1
+    log ERROR "$*" || true
+    exit 1
 }
 
 # --- Resolve the binary ------------------------------------------------------
@@ -46,22 +46,22 @@ esac
 
 BUILD_DIR="$SCRIPT_DIR/dist"
 if [[ "${DEBUG:-false}" == "true" || "${DEBUG:-}" == "1" ]]; then
-	BUILD_DIR="$BUILD_DIR/debug"
+    BUILD_DIR="$BUILD_DIR/debug"
 fi
 
 BINARY="${MIRROR_CLONE_BIN:-$BUILD_DIR/$PLATFORM/$BINARY_NAME}"
 
 if [[ ! -x "$BINARY" ]]; then
-	if [[ -n "${MIRROR_CLONE_BIN:-}" ]]; then
-		die "the binary $BINARY does not exist or is not executable"
-	fi
-	log ERROR "no binary for $PLATFORM at $BINARY" >&2
-	if [[ -x "$SCRIPT_DIR/dist/debug/$PLATFORM/$BINARY_NAME" ]]; then
-		log ERROR "there is a debug build, run it with: DEBUG=true $0 $*" >&2
-	else
-		log ERROR "build it with: $SCRIPT_DIR/build.bash --platform $PLATFORM" >&2
-	fi
-	exit 1
+    if [[ -n "${MIRROR_CLONE_BIN:-}" ]]; then
+        die "the binary $BINARY does not exist or is not executable"
+    fi
+    log ERROR "no binary for $PLATFORM at $BINARY" >&2
+    if [[ -x "$SCRIPT_DIR/dist/debug/$PLATFORM/$BINARY_NAME" ]]; then
+        log ERROR "there is a debug build, run it with: DEBUG=true $0 $*" >&2
+    else
+        log ERROR "build it with: $SCRIPT_DIR/build.bash --platform $PLATFORM" >&2
+    fi
+    exit 1
 fi
 
 # The log goes to stderr, so the output of the binary stays untouched.
