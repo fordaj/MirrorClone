@@ -11,3 +11,9 @@
 *.exe
 *.test
 coverage.out
+
+# Python tooling (uv)
+/.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
