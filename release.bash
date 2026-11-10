@@ -146,7 +146,20 @@ if [[ -n "$(git status --porcelain)" ]]; then
 fi
 
 if ! gh auth status >/dev/null 2>&1; then
-	die "gh is not authenticated (run: gh auth login)"
+	if [[ "$DRY_RUN" -eq 1 ]]; then
+		log WARNING "gh is not authenticated (allowed in --dry-run)"
+	else
+		die "gh is not authenticated (run: gh auth login)"
+	fi
+fi
+
+# Best effort fetch, so the check for an existing tag is up to date.
+if ! git fetch origin --tags >/dev/null 2>&1; then
+	if [[ "$DRY_RUN" -eq 1 ]]; then
+		log WARNING "git fetch origin --tags failed, the remote tag check may be stale"
+	else
+		die "git fetch origin --tags failed"
+	fi
 fi
 
 # --- Version and tag (computed by versioner) ---------------------------------
@@ -169,9 +182,19 @@ log INFO "VERSION=$VERSION  TAG=$TAG"
 if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null 2>&1; then
 	die "the tag $TAG already exists locally (make a new commit to bump the version, then re-run)"
 fi
-if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
+# git ls-remote exits with 2 when no matching ref was found and with 128
+# when the remote could not be reached.
+remote_status=0
+git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1 || remote_status=$?
+case "$remote_status" in
+0)
 	die "the tag $TAG already exists on origin (make a new commit to bump the version, then re-run)"
-fi
+	;;
+2) ;;
+*)
+	log WARNING "could not check the tags on origin (git ls-remote failed)"
+	;;
+esac
 
 # --- Plan --------------------------------------------------------------------
 

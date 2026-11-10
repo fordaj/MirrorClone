@@ -2,16 +2,29 @@
 set -euo pipefail
 
 # --- Source Scripts --- #
-(return 0 2>/dev/null) && sourced=true || sourced=false
-if ! "${sourced}"; then
-	source scripts/entry.sh
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
+# shellcheck disable=SC1091
+. "$SCRIPT_DIR/entry.sh"
+
+cd "$SCRIPT_DIR/.."
+
+need_cmd() {
+	command -v "$1" >/dev/null 2>&1 || {
+		log ERROR "required command not found: $1"
+		exit 1
+	}
+}
+
+need_cmd gofmt
+
+log INFO "formatting the go sources..."
+gofmt -w -l .
+
+if command -v goimports >/dev/null 2>&1; then
+	log INFO "running goimports..."
+	goimports -w .
+else
+	log INFO "goimports is not installed, skipping the import formatting"
 fi
 
-SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
-
-# shellcheck disable=SC1091
-. "$SCRIPT_DIR/env.sh"
-
-log INFO "running formattington $* all --config .formattington.json"
-uv run formattington "$@" all --config .formattington.json
 log INFO "format complete"

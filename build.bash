@@ -226,19 +226,21 @@ add_target() {
 	TARGETS+=("$platform")
 }
 
-if [[ ${#PLATFORM_FLAGS[@]} -gt 0 ]]; then
-	for platform in ${PLATFORM_FLAGS[@]+"${PLATFORM_FLAGS[@]}"}; do
-		add_target "$platform"
-	done
-elif [[ -n "${PLATFORMS:-}" ]]; then
-	for platform in $PLATFORMS; do
-		add_target "$platform"
-	done
-elif [[ "$ALL" -eq 1 ]]; then
+if [[ "$ALL" -eq 1 ]]; then
 	for platform in "${SUPPORTED_PLATFORMS[@]}"; do
 		add_target "$platform"
 	done
-else
+fi
+if [[ ${#PLATFORM_FLAGS[@]} -gt 0 ]]; then
+	for platform in "${PLATFORM_FLAGS[@]}"; do
+		add_target "$platform"
+	done
+elif [[ "$ALL" -eq 0 && -n "${PLATFORMS:-}" ]]; then
+	for platform in $PLATFORMS; do
+		add_target "$platform"
+	done
+fi
+if [[ ${#TARGETS[@]} -eq 0 ]]; then
 	HOST_PLATFORM="$(detect_host_platform)"
 	go_target "$HOST_PLATFORM" >/dev/null 2>&1 || die "unsupported host platform: $HOST_PLATFORM"
 	add_target "$HOST_PLATFORM"
