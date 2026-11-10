@@ -41,6 +41,18 @@ func run(args []string) int {
 
 	log := DefaultLogger(opts.LogLevel)
 
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	switch opts.Command {
+	case CommandInstall:
+		return runInstall(log)
+	case CommandUninstall:
+		return runUninstall(log)
+	case CommandUpdate:
+		return runUpdate(ctx, log)
+	}
+
 	cacheDir := opts.MirrorCacheDir
 	if cacheDir == "" {
 		cacheDir = os.Getenv("MIRROR_CLONE_MIRROR_CACHE_DIR")
@@ -72,9 +84,6 @@ func run(args []string) int {
 			jobs = 8
 		}
 	}
-
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 
 	cloner := NewMirrorCloner(NewGit(log), log, cacheDir, jobs)
 	if err := cloner.Clone(ctx, CloneRequest{

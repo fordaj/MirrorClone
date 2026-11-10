@@ -122,3 +122,58 @@ func TestParseArgsHelpAndVersion(t *testing.T) {
 		}
 	}
 }
+
+func TestParseArgsCommands(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+		want Command
+	}{
+		{name: "install", args: []string{"install"}, want: CommandInstall},
+		{name: "uninstall", args: []string{"uninstall"}, want: CommandUninstall},
+		{name: "update", args: []string{"update"}, want: CommandUpdate},
+		{name: "command after a flag", args: []string{"--log-level", "debug", "update"}, want: CommandUpdate},
+		{name: "command with a flag", args: []string{"install", "--quiet"}, want: CommandInstall},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			opts, err := parseArgs(tc.args)
+			if err != nil {
+				t.Fatalf("parseArgs(%v) returned error: %v", tc.args, err)
+			}
+			if opts.Command != tc.want {
+				t.Errorf("parseArgs(%v) = %q, want %q", tc.args, opts.Command, tc.want)
+			}
+			if opts.Repository != "" {
+				t.Errorf("parseArgs(%v) set the repository to %q", tc.args, opts.Repository)
+			}
+		})
+	}
+}
+
+func TestParseArgsCommandErrors(t *testing.T) {
+	cases := [][]string{
+		{"install", "extra"},
+		{"uninstall", "extra"},
+		{"update", "extra"},
+	}
+
+	for _, args := range cases {
+		if _, err := parseArgs(args); err == nil {
+			t.Errorf("parseArgs(%v) did not return an error", args)
+		}
+	}
+}
+
+func TestCommandByName(t *testing.T) {
+	for _, name := range []string{"install", "uninstall", "update"} {
+		if _, ok := commandByName(name); !ok {
+			t.Errorf("commandByName(%q) did not find the command", name)
+		}
+	}
+
+	if _, ok := commandByName("clone"); ok {
+		t.Error("commandByName(\"clone\") found a command")
+	}
+}

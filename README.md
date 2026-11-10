@@ -32,6 +32,8 @@ unzip mirror-clone_<version>_<platform>.zip
 The archive contains the binary, the `LICENSE` and the `README.md`. Put the
 binary somewhere on your `PATH` and you are done.
 
+The binary can also install itself, see [Self management](#self-management).
+
 ## Usage
 
 ```bash
@@ -70,6 +72,47 @@ mirror-clone --branch "main" "git@github.com:fordaj/AirFrame.git" "/c/Path/To/Di
 
 The cache directory can also be set with the `MIRROR_CLONE_MIRROR_CACHE_DIR`
 environment variable.
+
+## Self management
+
+The tool can install, update and remove itself:
+
+```bash
+mirror-clone install
+mirror-clone update
+mirror-clone uninstall
+```
+
+### install
+
+Copies the running executable into the executable directory of the user:
+
+| Platform     | Directory                              |
+| ------------ | -------------------------------------- |
+| Linux, macOS | `~/.local/bin`                         |
+| Windows      | `%LOCALAPPDATA%\Programs\mirror-clone` |
+
+The directory is created when it is missing and the copy is made
+executable. No administrator privileges are needed. When the directory is
+not on the `PATH`, the command prints the line that has to be added to the
+shell configuration; the configuration itself is never changed.
+
+### update
+
+Reads the latest stable release of the repository from the GitHub API,
+downloads the archive of the current platform and verifies its SHA256
+checksum against the `checksums.txt` of the release. The installed
+executable is replaced with the verified one.
+
+An installation that is newer than the latest release is never downgraded.
+When the download, the verification or the replacement fails, the installed
+executable is kept.
+
+### uninstall
+
+Removes the installed executable. The installation directory is only removed
+when it does not contain any other file. The configuration and the mirror
+cache of the user are never touched.
 
 ## Running the built binary
 

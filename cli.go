@@ -6,8 +6,37 @@ import (
 	"strings"
 )
 
+// Command is a self management command of the tool. The empty command is
+// the default one, which clones a repository.
+type Command string
+
+// The self management commands of the tool.
+const (
+	// CommandClone clones a repository through the mirror cache.
+	CommandClone Command = ""
+	// CommandInstall installs the tool for the user.
+	CommandInstall Command = "install"
+	// CommandUninstall removes the tool of the user.
+	CommandUninstall Command = "uninstall"
+	// CommandUpdate updates the tool to the latest stable release.
+	CommandUpdate Command = "update"
+)
+
+// commandByName returns the command with the given name.
+func commandByName(name string) (Command, bool) {
+	switch Command(name) {
+	case CommandInstall, CommandUninstall, CommandUpdate:
+		return Command(name), true
+	default:
+		return CommandClone, false
+	}
+}
+
 // Options holds the parsed command line options.
 type Options struct {
+	// Command is the self management command to run. It is empty when a
+	// repository is cloned.
+	Command Command
 	// Repository is the repository that is cloned.
 	Repository string
 	// Directory is the destination of the working copy. It defaults to the
@@ -31,6 +60,14 @@ const usageText = `mirror-clone - clone repositories through a local mirror cach
 
 Usage:
   mirror-clone [options] <repository> [directory]
+  mirror-clone install
+  mirror-clone uninstall
+  mirror-clone update
+
+Commands:
+  install     Install mirror-clone into the executable directory of the user.
+  uninstall   Remove the installed mirror-clone.
+  update      Update mirror-clone to the latest stable release.
 
 Arguments:
   repository            Repository to clone (URL or path).
@@ -53,6 +90,7 @@ Options:
 Examples:
   mirror-clone git@github.com:fordaj/AirFrame.git
   mirror-clone --branch main git@github.com:fordaj/AirFrame.git /tmp/AirFrame
+  mirror-clone install
 `
 
 // defaultCacheDirName is the name of the mirror cache directory inside the
@@ -172,6 +210,19 @@ func parseArgs(args []string) (Options, error) {
 
 		default:
 			positional = append(positional, arg)
+		}
+	}
+
+	// The first positional argument is the command, when it is one of the
+	// self management commands.
+	if len(positional) > 0 {
+		if command, ok := commandByName(positional[0]); ok {
+			opts.Command = command
+			positional = positional[1:]
+			if len(positional) > 0 {
+				return opts, fmt.Errorf("the %s command does not take arguments", command)
+			}
+			return opts, nil
 		}
 	}
 
