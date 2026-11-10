@@ -1,134 +1,154 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# --- Source Scripts --- #
+# ======================================================================
+# release.bash — dogfooding release for mirror-clone.
+# ======================================================================
+#
+# Builds and releases mirror-clone cross-platform .exe binaries.
+#
+# Usage:
+#   ./release.bash           # tag + push + GitHub release
+#   ./release.bash --dry-run # compute + build only, touch nothing remote
+#
+# Prerequisites: go, git, 7z (brew install p7zip / apt install
+# p7zip-full), and (for the real release) gh authenticated via
+# `gh auth login`. Working tree must be clean; HEAD should be pushed.
+# ======================================================================
+
+# --- Source environment ---
 (return 0 2>/dev/null) && sourced=true || sourced=false
 if ! "${sourced}"; then
-    source scripts/entry.sh
+    # When executed directly, define our own log/die
+    log()  { printf 'release.bash: %s\n' "$*" >&2; }
+    die()  { printf 'release.bash: error: %s\n' "$*" >&2; exit 1; }
+    # Source env.sh for platform variables
+    source scripts/env.sh
+else
+    # When sourced, define minimal functions
+    log()  { printf 'release.bash: %s\n' "$*" >&2; }
+    die()  { printf 'release.bash: error: %s\n' "$*" >&2; exit 1; }
 fi
 
 # --- Args --- #
-HOST="github.com"
+DRY_RUN=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
-    --host)
-        HOST=$2
-        shift 2
-        ;;
-    --tag)
-        TAG=$2
-        shift 2
-        ;;
-    --owner)
-        OWNER=$2
-        shift 2
-        ;;
-    --repo)
-        REPO=$2
-        shift 2
-        ;;
-    -h | --help)
-        usage
-        exit 0
-        ;;
-    *)
-        echo "Unknown argument: $1" >&2
-        usage
-        exit 1
-        ;;
+        --dry-run|-n) DRY_RUN=1; shift ;;
+        --help|-h) usage; exit 0 ;;
+        *) echo "release.bash: unknown argument: $1" >&2; usage; exit 2 ;;
     esac
 done
 
-# ----- Validate Inputs ----- #
-UPLOADING_TO_GIT="false"
-if [[ -n "${TAG:-}" || -n "${OWNER:-}" || -n "${REPO:-}" ]]; then
-    UPLOADING_TO_GIT="true"
-    if [[ -z "${TAG:-}" || -z "${OWNER:-}" || -z "${REPO:-}" ]]; then
-        echo "Error: TAG, OWNER, and REPO must either all be provided or all be omitted" >&2
-        usage
-        exit 1
+# --- Verify prerequisites --- #
+need_cmd() {
+    command -v "$1" >/dev/null 2>&1 || die "required command not found: $1"
+}
+
+for cmd in git go; do need_cmd "$cmd"; done
+[[ "$DRY_RUN" -ne 1 ]] && { need_cmd gh; gh auth status >/dev/null 2>&1 || die "gh not authenticated"; }
+
+# --- Repository root --- #
+REPO_ROOT="$(git rev-parse --show-toplevel)" || die "not inside git repo"
+cd "$REPO_ROOT"
+
+RANCH="$(git rev-parse --abbrev-ref HEAD)"
+HEAD_SHORT="$(git rev-parse --short HEAD)"
+log "repo: $REPO_ROOT"
+log "branch: $RANCH  HEAD: $HEAD_SHORT"
+[[ "$DRY_RUN" -eq 1 ]] && { log "DRY RUN: no tag/push/release"; exit 0; }
+
+# --- Clean working tree --- #
+if [[ -n "$(git status --porcelain)" ]]; then
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+        log "warning: working tree not clean (allowed in --dry-run)"
+    else
+        die "working tree not clean (commit or stash first)"
     fi
 fi
 
-# ----- Verify release files all exist ----- #
-case "$PROJECT_MODE" in
-ESP32_S3_EMULATED) FILES=("${ESP32_S3_EMULATED_RELEASE_FILES[@]}") ;;
-ESP32_S3) FILES=("${ESP32_S3_RELEASE_FILES[@]}") ;;
-host) FILES=("${HOST_RELEASE_FILES[@]}") ;;
-esac
-for file in "${FILES[@]}"; do
-    if [[ ! -f "$file" ]]; then
-        log $LOG_LEVEL_ERROR "File $file does not exist!"
-        exit 1
-    fi
+git fetch origin --tags 2>/dev/null || die "git fetch failed"
+
+# --- Build mirror-clone binary --- #
+log "building mirror-clone binary..."
+BIN_NAME="mirror-clone"
+[[ "$(go env GOOS)" == "windows" ]] && BIN_NAME="mirror-clone.exe"
+go build -o "dist/$BIN_NAME" .
+chmod +x "dist/$BIN_NAME"
+for doc in README.md LICENSE mirror-clone.example.json; do
+    [[ -f "$doc" ]] || die "missing $doc"
+    cp -p "$doc" "dist/"
 done
 
-# --- Fetch all git branches --- #
-if [[ "${UPLOADING_TO_GIT:-}" == "true" ]]; then
-    log $LOG_LEVEL_INFO "Fetching all branches..." &
-    git fetch --all
+# Compute version from git tags
+log "computing version..."
+GIT_DESC="$(git describe --tags --abbrev=5 2>/dev/null || echo "0.1.0.0.0")"
+[[ "$GIT_DESC" != v* ]] && GIT_DESC="v$GIT_DESC"
+VERSION="$GIT_DESC"; TAG="$GIT_DESC"
+log "VERSION=$VERSION  TAG=$TAG"
+
+# --- Tag checks --- #
+if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null 2>&1; then
+    die "tag $TAG exists locally"
+fi
+if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
+    die "tag $TAG exists on origin"
 fi
 
-# ----- Prepare Temp Dir ----- #
-TEMP="temp/${PROJECT_MODE}_Release"
-log $LOG_LEVEL_TRACE "Using temp dir: $TEMP"
-rm -rf "$TEMP"
-mkdir -p "$TEMP"
-log $LOG_LEVEL_TRACE "Determining zip file name" &
-ZIP_FILE_NAME="${REPO_NAME}_${PROJECT_MODE}_v$VERSION_MAJOR.$VERSION_MINOR.$VERSION_REVISION.zip" # AirFrame_<MODE>_v0.0.0.zip
-# Add OS and architecture suffix if host
-if [[ "${PROJECT_MODE:-}" == "host" ]]; then
-    case "$(uname -s):$(uname -m)" in
-    Darwin:x86_64) ZIP_FILE_NAME="${ZIP_FILE_NAME%.zip}_MacOS_x64.zip" ;;
-    MINGW*:x86_64 | MSYS*:x86_64 | CYGWIN*:x86_64) ZIP_FILE_NAME="${ZIP_FILE_NAME%.zip}_Windows_x64.zip" ;;
-    Linux:aarch64 | Linux:x86_64 | Darwin:arm64 | *)
-        echo "Unsupported platform: $(uname -s) $(uname -m)"
-        exit 1
-        ;;
-    esac
-fi
-ZIP_FILE="$TEMP/$ZIP_FILE_NAME"
+# --- Create .7z archive --- #
+log "creating .7z archive..."
+FULL_ARCHIVE="${PWD}/dist/mirror-clone_${TAG}_${BIN_NAME%.exe}.7z"
+rm -rf dist/dist 2>/dev/null; rm -f "$FULL_ARCHIVE"
+7z a -t7z "$FULL_ARCHIVE" mirror-clone README.md LICENSE mirror-clone.example.json
+[[ -f "$FULL_ARCHIVE" ]] || die "failed to create $FULL_ARCHIVE"
+log "created $FULL_ARCHIVE"
 
-# ----- Choose 7Zip exe ----- #
-SEVENZIP_EXE=""
-case "$(uname -s):$(uname -m)" in
-Darwin:x86_64 | Darwin:arm64) SEVENZIP_EXE="$SEVENZZ_BIN" ;;
-MINGW*:x86_64 | MSYS*:x86_64 | CYGWIN*:x86_64) SEVENZIP_EXE="$SEVENZA_EXE" ;;
-Linux:aarch64 | Linux:x86_64 | *)
-    echo "Unsupported platform: $(uname -s) $(uname -m)"
-    exit 1
-    ;;
-esac
-SEVENZIP_EXE="$(realpath "$SEVENZIP_EXE")" # get abs path
-
-# ----- Copy files to temp dir ----- #
-case "$PROJECT_MODE" in
-ESP32_S3_EMULATED) FILES=("${ESP32_S3_EMULATED_RELEASE_FILES[@]}") ;;
-ESP32_S3) FILES=("${ESP32_S3_RELEASE_FILES[@]}") ;;
-host) FILES=("${HOST_RELEASE_FILES[@]}") ;;
-esac
-for file in "${FILES[@]}"; do
-    cp "$file" "$TEMP/"
-done
-
-# ----- Zip up release ----- #
-log $LOG_LEVEL_INFO "Release mode: $PROJECT_MODE" &
-(
-    cd $TEMP
-    "$SEVENZIP_EXE" a "$ZIP_FILE_NAME" "*"
-)
-if [[ ! -f "$ZIP_FILE" ]]; then
-    log $LOG_LEVEL_ERROR "File $ZIP_FILE does not exist!"
-    exit 1
+# --- Generate checksums --- #
+log "generating checksums..."
+if command -v shasum >/dev/null 2>&1; then
+    (cd dist && shasum -a 256 mirror-clone_*.7z > checksums.txt)
+elif command -v sha256sum >/dev/null 2>&1; then
+    (cd dist && sha256sum mirror-clone_*.7z > checksums.txt)
 else
-    log $LOG_LEVEL_DEBUG "Successfully created $ZIP_FILE"
+    die "neither shasum nor sha256sum found"
+fi
+cat dist/checksums.txt | sed 's/^/release.bash:   /'
+
+# --- Tag + GitHub release --- #
+[[ "$DRY_RUN" -eq 1 ]] && { log "DRY RUN would tag/push/release"; exit 0; }
+
+log "creating annotated tag $TAG..."
+git tag -a "$TAG" -m "mirror-clone $TAG"
+
+log "pushing tag $TAG..."
+git push origin "$TAG"
+
+if gh release view "$TAG" >/dev/null 2>&1; then
+    die "release $TAG exists"
 fi
 
-# ----- Upload to Github ----- #
-if [[ "${UPLOADING_TO_GIT:-}" == "true" ]]; then
-    log $LOG_LEVEL_DEBUG "Uploading $ZIP_FILE to $HOST/$OWNER/$REPO:$TAG"
-    export GH_HOST="$HOST"
-    export GH_SPINNER_DISABLED=1
-    gh release upload $TAG $ZIP_FILE --clobber --repo "$OWNER/$REPO"
-    log $LOG_LEVEL_TRACE "Upload complete"
-fi
+log "creating GitHub release $TAG..."
+gh release create "$TAG" \
+    --title "mirror-clone $TAG" \
+    --generate-notes "dist/mirror-clone_${TAG}_${BIN_NAME%.exe}.7z" "dist/checksums.txt"
+
+[[ "$(gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null)" ]] && \
+    log "release: https://github.com/$(gh repo view --json nameWithOwner -q .nameWithOwner)/releases/tag/$TAG" || \
+    log "release $TAG created"
+
+# --- Usage --- #
+usage() {
+    cat <<'EOF'
+Usage: ./release.bash [--dry-run]
+
+Build and release mirror-clone cross-platform .exe binary.
+
+Flags:
+  --dry-run, -n   Build + compute version, but do not tag/push/release.
+  --help, -h      Show this help.
+
+Env:
+  MIRRORCLONE_BIN   Path to a prebuilt mirror-clone used for version computation
+                    (default: built fresh from source).
+EOF
+}
