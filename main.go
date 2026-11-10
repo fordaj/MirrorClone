@@ -14,9 +14,99 @@ import (
 )
 
 // toolVersion is the released version. It is injected at build time with
-//   -ldflags "-X main.toolVersion=<tag>"
+//
+//	-ldflags "-X main.toolVersion=<tag>"
+//
 // and defaults to "dev" for local, unstamped builds.
 var toolVersion = "dev"
+
+// mirrorFetchRefSpec mirrors the source's branches into the mirror's own
+// refs/heads/* so the mirror can be cloned from like a regular repository.
+//
+// go-git's default refspec ("+refs/heads/*:refs/remotes/origin/*") stores
+// the branches under refs/remotes/origin/* and leaves the mirror's HEAD
+// pointing at a branch that does not exist, which makes a clone from the
+// mirror fail with: couldn't find remote ref "HEAD".
+const mirrorFetchRefSpec = "+refs/heads/*:refs/heads/*"
+
+// syncMirror makes sure the bare mirror at mirrorPath holds the refs of
+// repoURL and that the mirror's HEAD points at the source's default
+// branch, so that a clone from the mirror resolves HEAD.
+func syncMirror(mirrorPath string, repoURL string) (*git.Repository, error) {
+	repo, err := git.PlainOpen(mirrorPath)
+	if err != nil {
+		// No mirror yet: create a bare one.
+		repo, err = git.PlainInit(mirrorPath, true)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	remote, err := repo.Remote("origin")
+	if err != nil {
+		remote, err = repo.CreateRemote(&config.RemoteConfig{
+			Name:  "origin",
+			URLs:  []string{repoURL},
+			Fetch: []config.RefSpec{mirrorFetchRefSpec},
+		})
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		// Existing mirror: switch it to the mirror refspec.
+		remote.Config().Fetch = []config.RefSpec{mirrorFetchRefSpec}
+	}
+
+	if err := remote.Fetch(&git.FetchOptions{}); err != nil && !errors.Is(err, git.NoErrAlreadyUpToDate) {
+		return nil, err
+	}
+
+	// Point the mirror's HEAD at the source's default branch.
+	refs, err := remote.List(&git.ListOptions{})
+	if err != nil {
+		return nil, err
+	}
+	for _, ref := range refs {
+		if ref.Name() == plumbing.HEAD && ref.Type() == plumbing.SymbolicReference {
+			if err := repo.Storer.SetReference(plumbing.NewSymbolicReference(plumbing.HEAD, ref.Target())); err != nil {
+				return nil, err
+			}
+			break
+		}
+	}
+
+	// Drop the refs/remotes/origin/* layout left behind by older versions
+	// so the mirror only holds its own refs/heads/* plus tags.
+	if err := pruneRemoteRefs(repo); err != nil {
+		return nil, err
+	}
+
+	return repo, nil
+}
+
+// pruneRemoteRefs removes the refs/remotes/* refs of a mirror.
+func pruneRemoteRefs(repo *git.Repository) error {
+	iter, err := repo.References()
+	if err != nil {
+		return err
+	}
+	var stale []plumbing.ReferenceName
+	err = iter.ForEach(func(ref *plumbing.Reference) error {
+		if ref.Name().IsRemote() {
+			stale = append(stale, ref.Name())
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	for _, name := range stale {
+		if err := repo.Storer.RemoveReference(name); err != nil && err != plumbing.ErrReferenceNotFound {
+			return err
+		}
+	}
+	return nil
+}
 
 // rel returns the relative path of p to the current working directory.
 func rel(path string) string {
@@ -106,61 +196,38 @@ func main() {
 	// Mirror cache directory
 	mirrorDir := filepath.Join(os.Getenv("HOME"), ".mirror-clones")
 
-	// Ensure destination directory exists
+	// Ensure destination and mirror directories exist
 	os.MkdirAll(destDir, 0755)
+	os.MkdirAll(mirrorDir, 0755)
+
+	// Cloning into a non-empty directory fails with a cryptic
+	// "repository already exists" error; say what actually went wrong.
+	if entries, err := os.ReadDir(destDir); err == nil && len(entries) > 0 {
+		fmt.Fprintf(os.Stderr, "Error: destination directory %s already exists and is not empty\n", destDir)
+		os.Exit(1)
+	}
 
 	fmt.Printf("Cloning %s into %s\n", repoURL, destDir)
 
 	// Clone or fetch mirror
 	mirrorPath := filepath.Join(mirrorDir, repoName+".git")
-	var mirrorRepo *git.Repository
-
 	if _, err := os.Stat(mirrorPath); !errors.Is(err, os.ErrNotExist) {
 		fmt.Printf("Fetching latest in %s\n", mirrorPath)
-		var openErr error
-		mirrorRepo, openErr = git.PlainOpen(mirrorPath)
-		if openErr != nil {
-			fmt.Fprintf(os.Stderr, "Error: failed to open mirror: %v\n", openErr)
-			os.Exit(1)
-		}
-		fetchErr := mirrorRepo.Fetch(&git.FetchOptions{
-			RemoteName: "origin",
-		})
-		if fetchErr != nil && fetchErr.Error() != "git: no changes to fetch" {
-			fmt.Fprintf(os.Stderr, "Warning: mirror fetch had issues: %v\n", fetchErr)
-		}
 	} else {
 		fmt.Printf("Mirror cloning %s\n", repoURL)
-		var cloneErr error
-		mirrorRepo, cloneErr = git.PlainInit(mirrorPath, true)
-		if cloneErr != nil {
-			fmt.Fprintf(os.Stderr, "Error: failed to init mirror: %v\n", cloneErr)
-			os.Exit(1)
-		}
-		// Add remote and fetch
-		_, err := mirrorRepo.CreateRemote(&config.RemoteConfig{
-			Name: "origin",
-			URLs: []string{repoURL},
-		})
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: failed to add remote: %v\n", err)
-			os.Exit(1)
-		}
-		err = mirrorRepo.Fetch(&git.FetchOptions{
-			RemoteName: "origin",
-		})
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: failed to fetch mirror: %v\n", err)
-			os.Exit(1)
-		}
+	}
+	mirrorRepo, syncErr := syncMirror(mirrorPath, repoURL)
+	if syncErr != nil {
+		fmt.Fprintf(os.Stderr, "Error: failed to update mirror: %v\n", syncErr)
+		os.Exit(1)
 	}
 
 	// Clone from mirror to destination
 	cloneOpts := &git.CloneOptions{
-		URL:      mirrorPath,
-		Progress: os.Stdout,
+		URL:          mirrorPath,
+		Progress:     os.Stdout,
 		SingleBranch: true,
-		NoCheckout: false,
+		NoCheckout:   false,
 	}
 
 	// Only specify reference name if a branch was explicitly provided
@@ -198,7 +265,7 @@ func recursiveSubmodules(workDir, mirrorDir string, mirrorRepo *git.Repository) 
 	fmt.Printf("Submodule init: %s", string(output))
 
 	// Get submodule status
-	cmd = exec.Command("git", "submodule", "status", workDir)
+	cmd = exec.Command("git", "submodule", "status")
 	cmd.Dir = workDir
 	output, err = cmd.CombinedOutput()
 	if err != nil {
@@ -236,54 +303,20 @@ func recursiveSubmodules(workDir, mirrorDir string, mirrorRepo *git.Repository) 
 		}
 
 		subFullPath := filepath.Join(workDir, subPath)
-		subModuleName := filepath.Base(subURL)
+		subModuleName := strings.TrimSuffix(filepath.Base(subURL), ".git")
 
 		// Determine mirror path for the submodule
 		smMirrorPath := filepath.Join(mirrorDir, subModuleName+".git")
 
-		// Check if mirror exists
-		smExists := false
-		if _, err := os.Stat(smMirrorPath); err == nil {
-			smExists = true
-		}
-
-		if smExists {
+		// Mirror the submodule the same way as the top level repo, so the
+		// mirror layout (refs/heads/* plus a valid HEAD) is consistent.
+		if _, statErr := os.Stat(smMirrorPath); statErr == nil {
 			fmt.Printf("Using existing submodule mirror %s\n", smMirrorPath)
-			// Fetch updates
-			smMirrorRepo, err := git.PlainOpen(smMirrorPath)
-			if err != nil {
-				return fmt.Errorf("failed to open submodule mirror: %v", err)
-			}
-			err = smMirrorRepo.Fetch(&git.FetchOptions{
-				RemoteName: "origin",
-			})
-			if err != nil && err.Error() != "git: no changes to fetch" {
-				fmt.Fprintf(os.Stderr, "Warning: submodule mirror fetch had issues: %v\n", err)
-			}
 		} else {
 			fmt.Printf("Mirror cloning submodule %s\n", subURL)
-			_, err = git.PlainInit(smMirrorPath, true)
-			if err != nil {
-				return fmt.Errorf("failed to init submodule mirror: %v", err)
-			}
-			// Add remote and fetch
-			smMirrorRepo, err := git.PlainOpen(smMirrorPath)
-			if err != nil {
-				return fmt.Errorf("failed to open submodule mirror: %v", err)
-			}
-			_, err = smMirrorRepo.CreateRemote(&config.RemoteConfig{
-				Name: "origin",
-				URLs: []string{subURL},
-			})
-			if err != nil {
-				return fmt.Errorf("failed to add submodule remote: %v", err)
-			}
-			err = smMirrorRepo.Fetch(&git.FetchOptions{
-				RemoteName: "origin",
-			})
-			if err != nil && err.Error() != "git: no changes to fetch" {
-				fmt.Fprintf(os.Stderr, "Warning: submodule mirror fetch had issues: %v\n", err)
-			}
+		}
+		if _, mirrorErr := syncMirror(smMirrorPath, subURL); mirrorErr != nil {
+			return fmt.Errorf("failed to update submodule mirror for %s: %v", subPath, mirrorErr)
 		}
 
 		// Update the submodule to the correct SHA
