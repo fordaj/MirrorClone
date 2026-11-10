@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-source "scripts/env.sh"
+ENTRY_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+source "$ENTRY_DIR/env.sh"
 
 # log LEVEL [MESSAGE ...]
 #   LEVEL may be a word (INFO) or a number (50). When a logamuffin
