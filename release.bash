@@ -75,7 +75,7 @@ BIN_NAME="mirror-clone"
 [[ "$(go env GOOS)" == "windows" ]] && BIN_NAME="mirror-clone.exe"
 go build -o "dist/$BIN_NAME" .
 chmod +x "dist/$BIN_NAME"
-for doc in README.md LICENSE mirror-clone.example.json; do
+for doc in README.md LICENSE; do
     [[ -f "$doc" ]] || die "missing $doc"
     cp -p "$doc" "dist/"
 done
@@ -99,7 +99,7 @@ fi
 log "creating .7z archive..."
 FULL_ARCHIVE="${PWD}/dist/mirror-clone_${TAG}_${BIN_NAME%.exe}.7z"
 rm -rf dist/dist 2>/dev/null; rm -f "$FULL_ARCHIVE"
-7z a -t7z "$FULL_ARCHIVE" mirror-clone README.md LICENSE mirror-clone.example.json
+7z a -t7z "$FULL_ARCHIVE" mirror-clone README.md LICENSE
 [[ -f "$FULL_ARCHIVE" ]] || die "failed to create $FULL_ARCHIVE"
 log "created $FULL_ARCHIVE"
 
