@@ -9,6 +9,7 @@
 #   4. go test          the unit and integration tests have to pass
 #   5. smoke test       the built binary has to run
 #   6. shellcheck       the shell scripts have to be free of findings
+#   7. formatting       the sources have to match the formattington config
 #
 # Usage:
 #   ./test.bash              # run every check
@@ -18,6 +19,7 @@
 # Environment:
 #   GO_TEST_FLAGS   extra flags passed to "go test"
 #   SKIP_SHELLCHECK set to true to skip the shellcheck run
+#   SKIP_FORMATTING set to true to skip the formatting check
 
 set -euo pipefail
 
@@ -31,11 +33,12 @@ QUICK=0
 FAILURES=0
 
 usage() {
-	cat <<EOF
+    cat <<EOF
 Usage: ./test.bash [options]
 
 Run every check of the project: gofmt, go vet, go build, go test, a smoke
-test of the built binary and shellcheck of the shell scripts.
+test of the built binary, shellcheck of the shell scripts and the formatting
+check of format.bash.
 
 Options:
   --coverage        Write a coverage profile to coverage.out.
@@ -45,58 +48,59 @@ Options:
 Environment:
   GO_TEST_FLAGS     Extra flags passed to "go test".
   SKIP_SHELLCHECK   Set to true to skip the shellcheck run.
+  SKIP_FORMATTING   Set to true to skip the formatting check.
 EOF
 }
 
 while [[ $# -gt 0 ]]; do
-	case "$1" in
-	--coverage)
-		COVERAGE=1
-		shift
-		;;
-	--quick)
-		QUICK=1
-		shift
-		;;
-	--help | -h)
-		usage
-		exit 0
-		;;
-	*)
-		log ERROR "unknown argument: $1"
-		usage >&2
-		exit 2
-		;;
-	esac
+    case "$1" in
+    --coverage)
+        COVERAGE=1
+        shift
+        ;;
+    --quick)
+        QUICK=1
+        shift
+        ;;
+    --help | -h)
+        usage
+        exit 0
+        ;;
+    *)
+        log ERROR "unknown argument: $1"
+        usage >&2
+        exit 2
+        ;;
+    esac
 done
 
 need_cmd() {
-	command -v "$1" >/dev/null 2>&1 || {
-		log ERROR "required command not found: $1"
-		FAILURES=$((FAILURES + 1))
-		return 1
-	}
+    command -v "$1" >/dev/null 2>&1 || {
+        log ERROR "required command not found: $1"
+        FAILURES=$((FAILURES + 1))
+        return 1
+    }
 }
 
 # run_check <name> <command...> runs a check and counts the failures.
 run_check() {
-	local name="$1"
-	shift
-	log INFO "running $name..."
-	if "$@"; then
-		log INFO "$name passed"
-		return 0
-	fi
-	log ERROR "$name failed"
-	FAILURES=$((FAILURES + 1))
-	return 1
+    local name="$1"
+    shift
+    log INFO "running $name..."
+    if "$@"; then
+        log INFO "$name passed"
+        return 0
+    fi
+    log ERROR "$name failed"
+    FAILURES=$((FAILURES + 1))
+    return 1
 }
 
 cd "$SCRIPT_DIR"
 
 if ! need_cmd go; then
-	log ERROR "the go toolchain is required"
-	exit 1
+    log ERROR "the go toolchain is required"
+    exit 1
 fi
 
 log INFO "$(go version)"
@@ -105,11 +109,11 @@ log INFO "$(go version)"
 
 UNFORMATTED="$(gofmt -l . 2>/dev/null | grep -v '^vendor/' || true)"
 if [[ -n "$UNFORMATTED" ]]; then
-	log ERROR "the following files are not formatted (run: gofmt -w .):"
-	printf '%s\n' "$UNFORMATTED" | sed 's/^/test.bash:   /' >&2
-	FAILURES=$((FAILURES + 1))
+    log ERROR "the following files are not formatted (run: gofmt -w .):"
+    printf '%s\n' "$UNFORMATTED" | sed 's/^/test.bash:   /' >&2
+    FAILURES=$((FAILURES + 1))
 else
-	log INFO "gofmt passed"
+    log INFO "gofmt passed"
 fi
 
 # --- 2. go vet ---------------------------------------------------------------
@@ -120,7 +124,7 @@ run_check "go vet" go vet ./... || true
 
 SMOKE_DIR="$(mktemp -d)"
 cleanup() {
-	rm -rf -- "$SMOKE_DIR"
+    rm -rf -- "$SMOKE_DIR"
 }
 trap cleanup EXIT
 
@@ -131,14 +135,14 @@ run_check "go build" go build -o "$SMOKE_DIR/bin/" ./... || true
 
 TEST_FLAGS=(-count=1)
 if [[ -n "${GO_TEST_FLAGS:-}" ]]; then
-	read -r -a EXTRA_TEST_FLAGS <<<"$GO_TEST_FLAGS"
-	TEST_FLAGS+=("${EXTRA_TEST_FLAGS[@]}")
+    read -r -a EXTRA_TEST_FLAGS <<<"$GO_TEST_FLAGS"
+    TEST_FLAGS+=("${EXTRA_TEST_FLAGS[@]}")
 fi
 if [[ "$COVERAGE" -eq 1 ]]; then
-	TEST_FLAGS+=(-coverprofile=coverage.out -covermode=atomic)
+    TEST_FLAGS+=(-coverprofile=coverage.out -covermode=atomic)
 fi
 if [[ "$QUICK" -eq 0 ]] && [[ "$(go env CGO_ENABLED)" == "1" ]]; then
-	TEST_FLAGS+=(-race)
+    TEST_FLAGS+=(-race)
 fi
 
 run_check "go test" go test "${TEST_FLAGS[@]}" ./... || true
@@ -146,41 +150,52 @@ run_check "go test" go test "${TEST_FLAGS[@]}" ./... || true
 # --- 5. smoke test -----------------------------------------------------------
 
 if go build -o "$SMOKE_DIR/$APP_NAME" .; then
-	if "$SMOKE_DIR/$APP_NAME" --version >/dev/null && "$SMOKE_DIR/$APP_NAME" --help >/dev/null; then
-		log INFO "smoke test passed ($("$SMOKE_DIR/$APP_NAME" --version))"
-	else
-		log ERROR "the smoke test failed"
-		FAILURES=$((FAILURES + 1))
-	fi
+    if "$SMOKE_DIR/$APP_NAME" --version >/dev/null && "$SMOKE_DIR/$APP_NAME" --help >/dev/null; then
+        log INFO "smoke test passed ($("$SMOKE_DIR/$APP_NAME" --version))"
+    else
+        log ERROR "the smoke test failed"
+        FAILURES=$((FAILURES + 1))
+    fi
 else
-	log ERROR "could not build the binary for the smoke test"
-	FAILURES=$((FAILURES + 1))
+    log ERROR "could not build the binary for the smoke test"
+    FAILURES=$((FAILURES + 1))
 fi
 
 # --- 6. shellcheck -----------------------------------------------------------
 
 if [[ "${SKIP_SHELLCHECK:-false}" == "true" || "${SKIP_SHELLCHECK:-}" == "1" ]]; then
-	log INFO "shellcheck skipped"
+    log INFO "shellcheck skipped"
 elif command -v shellcheck >/dev/null 2>&1; then
-	SCRIPTS=(
-		"$SCRIPT_DIR/build.bash"
-		"$SCRIPT_DIR/release.bash"
-		"$SCRIPT_DIR/test.bash"
-		"$SCRIPT_DIR/run.bash"
-		"$SCRIPT_DIR/scripts/entry.sh"
-		"$SCRIPT_DIR/scripts/env.sh"
-		"$SCRIPT_DIR/scripts/version.bash"
-	)
-	run_check "shellcheck" shellcheck -x "${SCRIPTS[@]}" || true
+    SCRIPTS=(
+        "$SCRIPT_DIR/build.bash"
+        "$SCRIPT_DIR/release.bash"
+        "$SCRIPT_DIR/test.bash"
+        "$SCRIPT_DIR/run.bash"
+        "$SCRIPT_DIR/format.bash"
+        "$SCRIPT_DIR/scripts/entry.sh"
+        "$SCRIPT_DIR/scripts/env.sh"
+        "$SCRIPT_DIR/scripts/version.bash"
+    )
+    run_check "shellcheck" shellcheck -x "${SCRIPTS[@]}" || true
 else
-	log WARNING "shellcheck is not installed, skipping the shell scripts"
+    log WARNING "shellcheck is not installed, skipping the shell scripts"
+fi
+
+# --- 7. formatting -----------------------------------------------------------
+
+if [[ "${SKIP_FORMATTING:-false}" == "true" || "${SKIP_FORMATTING:-}" == "1" ]]; then
+    log INFO "formatting check skipped"
+elif ! command -v uv >/dev/null 2>&1; then
+    log WARNING "uv is not installed, skipping the formatting check"
+else
+    run_check "formatting" "$SCRIPT_DIR/format.bash" --check || true
 fi
 
 # --- Result ------------------------------------------------------------------
 
 if [[ "$FAILURES" -gt 0 ]]; then
-	log ERROR "$FAILURES check(s) failed"
-	exit 1
+    log ERROR "$FAILURES check(s) failed"
+    exit 1
 fi
 
 log INFO "all checks passed"

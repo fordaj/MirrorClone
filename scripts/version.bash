@@ -23,21 +23,21 @@ source "$SCRIPT_DIR/entry.sh"
 
 FORMAT="text"
 while [[ $# -gt 0 ]]; do
-	case "$1" in
-	--format)
-		[[ $# -ge 2 ]] || {
-			log ERROR "--format requires a value"
-			exit 2
-		}
-		FORMAT="$2"
-		shift 2
-		;;
-	--format=*)
-		FORMAT="${1#--format=}"
-		shift
-		;;
-	--help | -h)
-		cat <<'EOF'
+    case "$1" in
+    --format)
+        [[ $# -ge 2 ]] || {
+            log ERROR "--format requires a value"
+            exit 2
+        }
+        FORMAT="$2"
+        shift 2
+        ;;
+    --format=*)
+        FORMAT="${1#--format=}"
+        shift
+        ;;
+    --help | -h)
+        cat <<'EOF'
 Usage: scripts/version.bash [--format text|shell|json]
 
 Print the version of the repository computed by versioner.
@@ -46,26 +46,26 @@ Print the version of the repository computed by versioner.
   shell  export VERSION=... and export TAG=... lines
   json   the raw json document produced by versioner
 EOF
-		exit 0
-		;;
-	*)
-		log ERROR "unknown argument: $1"
-		exit 2
-		;;
-	esac
+        exit 0
+        ;;
+    *)
+        log ERROR "unknown argument: $1"
+        exit 2
+        ;;
+    esac
 done
 
 REPO_DIR="${VERSIONER_REPO_DIR:-${REPO_ROOT_DIR:-$SCRIPT_DIR/..}}"
 REPO_DIR="$(cd -- "$REPO_DIR" && pwd)"
 
 if [[ -z "${VERSIONER_BIN:-}" || ! -x "${VERSIONER_BIN:-}" ]]; then
-	log ERROR "no versioner binary found (run tools/versioner/update.bash or set VERSIONER_BIN)"
-	exit 1
+    log ERROR "no versioner binary found (run tools/versioner/update.bash or set VERSIONER_BIN)"
+    exit 1
 fi
 
 if [[ "$FORMAT" == "json" ]]; then
-	"$VERSIONER_BIN" --repo-dir "$REPO_DIR" --quiet --format json
-	exit 0
+    "$VERSIONER_BIN" --repo-dir "$REPO_DIR" --quiet --format json
+    exit 0
 fi
 
 OUTPUT="$("$VERSIONER_BIN" --repo-dir "$REPO_DIR" --quiet)"
@@ -74,25 +74,25 @@ VERSION="$(printf '%s\n' "$OUTPUT" | sed -n 's/^VERSION=//p' | tail -1)"
 TAG="$(printf '%s\n' "$OUTPUT" | sed -n 's/^TAG=//p' | tail -1)"
 
 [[ -n "$VERSION" ]] || {
-	log ERROR "could not parse VERSION from the versioner output"
-	exit 1
+    log ERROR "could not parse VERSION from the versioner output"
+    exit 1
 }
 [[ -n "$TAG" ]] || {
-	log ERROR "could not parse TAG from the versioner output"
-	exit 1
+    log ERROR "could not parse TAG from the versioner output"
+    exit 1
 }
 
 case "$FORMAT" in
 text)
-	printf 'VERSION=%s\n' "$VERSION"
-	printf 'TAG=%s\n' "$TAG"
-	;;
+    printf 'VERSION=%s\n' "$VERSION"
+    printf 'TAG=%s\n' "$TAG"
+    ;;
 shell)
-	printf 'export VERSION=%s\n' "$VERSION"
-	printf 'export TAG=%s\n' "$TAG"
-	;;
+    printf 'export VERSION=%s\n' "$VERSION"
+    printf 'export TAG=%s\n' "$TAG"
+    ;;
 *)
-	log ERROR "unknown format: $FORMAT (expected text, shell or json)"
-	exit 2
-	;;
+    log ERROR "unknown format: $FORMAT (expected text, shell or json)"
+    exit 2
+    ;;
 esac

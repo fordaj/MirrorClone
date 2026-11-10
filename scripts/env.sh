@@ -13,7 +13,10 @@ source "$ENV_DIR/.common.env"
 # editing every platform env file.
 resolve_version_dir() {
     local tool_dir="$1" fallback="$2" newest=""
-    [[ -d "$tool_dir" ]] || { printf '%s' "$fallback"; return 0; }
+    [[ -d "$tool_dir" ]] || {
+        printf '%s' "$fallback"
+        return 0
+    }
     # The version directories are plain "v<number>" names, so a glob is
     # safe here.
     # shellcheck disable=SC2010
@@ -40,11 +43,11 @@ Linux:aarch64) source "$ENV_DIR/.linux-arm64.env" ;;
 MINGW*:x86_64 | MSYS*:x86_64 | CYGWIN*:x86_64) source "$ENV_DIR/.windows-x86_64.env" ;;
 MINGW*:aarch64 | MSYS*:aarch64 | CYGWIN*:aarch64 | MINGW*:arm64 | MSYS*:arm64 | CYGWIN*:arm64) source "$ENV_DIR/.windows-arm64.env" ;;
 *)
-	echo "Unsupported platform: $(uname -s) $(uname -m)" >&2
-	set +a
-	# shellcheck disable=SC2317
-	return 1 2>/dev/null || exit 1
-	;;
+    echo "Unsupported platform: $(uname -s) $(uname -m)" >&2
+    set +a
+    # shellcheck disable=SC2317
+    return 1 2>/dev/null || exit 1
+    ;;
 esac
 
 # --- Anchor tool paths to the repository root -------------------------
@@ -55,7 +58,7 @@ REPO_ROOT_DIR="$(cd -- "$ENV_DIR/.." && pwd)"
 absolutize_bin() {
     local var="$1" value="${!1:-}"
     case "$value" in
-        "" | /*) return 0 ;;
+    "" | /*) return 0 ;;
     esac
     printf -v "$var" '%s' "$REPO_ROOT_DIR/$value"
 }
