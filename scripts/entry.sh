@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ENTRY_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck disable=SC1091
 source "$ENTRY_DIR/env.sh"
 
 # log LEVEL [MESSAGE ...]

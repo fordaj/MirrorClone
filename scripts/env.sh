@@ -3,6 +3,7 @@ set -a
 
 ENV_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
+# shellcheck disable=SC1091
 source "$ENV_DIR/.common.env"
 
 # --- Resolve the newest bundled tool version ---------------------------
@@ -13,6 +14,9 @@ source "$ENV_DIR/.common.env"
 resolve_version_dir() {
     local tool_dir="$1" fallback="$2" newest=""
     [[ -d "$tool_dir" ]] || { printf '%s' "$fallback"; return 0; }
+    # The version directories are plain "v<number>" names, so a glob is
+    # safe here.
+    # shellcheck disable=SC2010
     newest="$(ls -1 "$tool_dir" 2>/dev/null | grep -E '^v[0-9]' | sort -V 2>/dev/null | tail -n 1 || true)"
     if [[ -n "$newest" && -d "$tool_dir/$newest" ]]; then
         printf '%s' "$tool_dir/$newest"
@@ -27,6 +31,7 @@ RUNNER_SPAWNER_VERSION_DIR="$(resolve_version_dir "$RUNNER_SPAWNER_DIR" "$RUNNER
 SEVENZIP_VERSION_DIR="$(resolve_version_dir "$SEVENZIP_DIR" "$SEVENZIP_VERSION_DIR")"
 
 # OS specific
+# shellcheck disable=SC1091
 case "$(uname -s):$(uname -m)" in
 Darwin:x86_64) source "$ENV_DIR/.macos-x86_64.env" ;;
 Darwin:arm64) source "$ENV_DIR/.macos-arm64.env" ;;
@@ -37,6 +42,7 @@ MINGW*:aarch64 | MSYS*:aarch64 | CYGWIN*:aarch64 | MINGW*:arm64 | MSYS*:arm64 | 
 *)
 	echo "Unsupported platform: $(uname -s) $(uname -m)" >&2
 	set +a
+	# shellcheck disable=SC2317
 	return 1 2>/dev/null || exit 1
 	;;
 esac
