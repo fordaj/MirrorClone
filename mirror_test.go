@@ -266,6 +266,29 @@ func TestCloneUpdatesExistingDestination(t *testing.T) {
 	}
 }
 
+func TestCloneIsSelfContained(t *testing.T) {
+	requireGit(t)
+
+	base := t.TempDir()
+	src := newSourceRepo(t, filepath.Join(base, "src"), "file.txt", "hello")
+	bare := newBareRepo(t, src, filepath.Join(base, "src.git"))
+
+	cache := filepath.Join(base, "cache")
+	dest := filepath.Join(base, "dest")
+
+	cloner, _ := newTestCloner(t, cache)
+	if err := cloner.Clone(context.Background(), CloneRequest{URL: bare, Dest: dest}); err != nil {
+		t.Fatalf("Clone failed: %v", err)
+	}
+
+	// The clone must not depend on the mirror cache, the borrowed objects
+	// have to be copied into the clone.
+	alternates := filepath.Join(dest, ".git", "objects", "info", "alternates")
+	if data, err := os.ReadFile(alternates); err == nil {
+		t.Errorf("the clone borrows the objects of the mirror: %s", strings.TrimSpace(string(data)))
+	}
+}
+
 func listDir(t *testing.T, dir string) []string {
 	t.Helper()
 	entries, err := os.ReadDir(dir)

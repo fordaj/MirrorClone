@@ -11,7 +11,8 @@ Linux, macOS and Windows (x86_64 and arm64).
 1. The repository is mirrored once into the mirror cache
    (`~/.mirror-clones` by default).
 2. The working copy is cloned from that mirror, so the objects are not
-   downloaded twice.
+   downloaded twice. The borrowed objects are copied into the new repository,
+   so the clone keeps working when the cache is removed.
 3. Every submodule is mirrored and cloned the same way. Relative submodule
    URLs (`../lib.git`) are resolved against the URL of the superproject, just
    like git does it.

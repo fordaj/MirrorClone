@@ -171,7 +171,11 @@ func (m *MirrorCloner) cloneFromMirror(ctx context.Context, mirror, url, dest st
 	}
 
 	m.log.Infof("Cloning %s from %s", dest, mirror)
-	if _, err := m.git.Run(ctx, "", "clone", "--reference", mirror, url, dest); err != nil {
+	// --reference makes git use the objects of the mirror instead of
+	// downloading them again, --dissociate copies the borrowed objects
+	// into the new repository so the clone stays usable when the mirror
+	// cache is removed.
+	if _, err := m.git.Run(ctx, "", "clone", "--reference", mirror, "--dissociate", url, dest); err != nil {
 		return fmt.Errorf("cloning %s: %w", url, err)
 	}
 	return nil
