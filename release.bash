@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# release.bash — dogfooding release for versioner.
+# release.bash — dogfooding release for mirror-clone.
 #
-# Uses versioner itself to compute the next tag, cross-compiles the
+# Uses mirror-clone itself to compute the next tag, cross-compiles the
 # release binaries for injection (ldflags toolVersion=$TAG), packs each
-# architecture into Versioner_<tag>_<arch>.7z (binary + README + LICENSE
+# architecture into mirror-clone_<tag>_<arch>.7z (binary + README + LICENSE
 # + example config), tags HEAD, and publishes a GitHub release with
 # the .7z archives + SHA-256 checksums.
 #
@@ -23,10 +23,10 @@ usage() {
     cat <<'EOF'
 Usage: ./release.bash [--dry-run]
 
-Compute the next version with versioner itself (dogfooding), cross-compile
-the release binaries (see Makefile `cross`) into dist/<arch>/versioner[.exe],
-pack each into Versioner_<tag>_<arch>.7z (binary + README.md + LICENSE +
-versioner.example.json), create an annotated tag, push it, and create a
+Compute the next version with mirror-clone itself (dogfooding), cross-compile
+the release binaries (see Makefile `cross`) into dist/<arch>/mirror-clone[.exe],
+pack each into mirror-clone_<tag>_<arch>.7z (binary + README.md + LICENSE +
+mirror-clone.example.json), create an annotated tag, push it, and create a
 GitHub release with the .7z archives + checksums.
 
 Flags:
@@ -34,8 +34,8 @@ Flags:
   --help, -h      Show this help.
 
 Env:
-  VERSIONER_BIN   Path to a prebuilt versioner used for version computation
-                  (default: built fresh from source).
+  MIRRORCLONE_BIN   Path to a prebuilt mirror-clone used for version computation
+                    (default: built fresh from source).
 EOF
 }
 
@@ -102,29 +102,29 @@ if ! git fetch origin --tags 2>/dev/null; then
     fi
 fi
 
-# --- Dogfooding: build versioner + compute VERSION/TAG ----------------
+# --- Dogfooding: build mirror-clone + compute VERSION/TAG ----------------
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
-DOGFOOD_BIN="$TMP_DIR/versioner-dogfood"
+MIRRORCLONE_BIN="$TMP_DIR/mirror-clone-dogfood"
 
 if [[ -n "${VERSIONER_BIN:-}" ]]; then
     [[ -x "$VERSIONER_BIN" ]] || die "VERSIONER_BIN=$VERSIONER_BIN is not executable"
     DOGFOOD_BIN="$VERSIONER_BIN"
-    log "using prebuilt versioner: $DOGFOOD_BIN"
+    log "using prebuilt mirror-clone: $MIRRORCLONE_BIN"
 else
-    log "building dogfood versioner..."
+    log "building dogfood mirror-clone..."
     CGO_ENABLED=0 go build -trimpath -o "$DOGFOOD_BIN" .
 fi
 
-log "computing version with versioner (dogfooding)..."
-VERSION_OUT="$("$DOGFOOD_BIN" --repo-dir "$REPO_ROOT")"
-log "versioner output:"
+log "computing version with mirror-clone (dogfooding)..."
+VERSION_OUT="$("$MIRRORCLONE_BIN" --repo-dir "$REPO_ROOT")"
+log "mirror-clone output:"
 printf '%s\n' "$VERSION_OUT" | sed 's/^/release.bash:   /'
 
 VERSION="$(printf '%s\n' "$VERSION_OUT" | sed -n 's/^VERSION=//p' | tail -1)"
 TAG="$(printf '%s\n' "$VERSION_OUT" | sed -n 's/^TAG=//p' | tail -1)"
-[[ -n "$VERSION" ]] || die "could not parse VERSION from versioner output"
-[[ -n "$TAG" ]] || die "could not parse TAG from versioner output"
+[[ -n "$VERSION" ]] || die "could not parse VERSION from mirror-clone output"
+[[ -n "$TAG" ]] || die "could not parse TAG from mirror-clone output"
 if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
     die "computed tag looks invalid: '$TAG' (expected vX.Y.Z.W.V)"
 fi
@@ -149,9 +149,9 @@ log "built ${#arch_dirs[@]} architecture directories:"
 for d in "${arch_dirs[@]}"; do log "  $d"; done
 
 # Stage user docs next to each binary (dist/<arch>/README.md, LICENSE,
-# versioner.example.json) for inclusion in the .7z archives.
+# mirror-clone.example.json) for inclusion in the .7z archives.
 for d in "${arch_dirs[@]}"; do
-    for doc in README.md LICENSE versioner.example.json; do
+    for doc in README.md LICENSE mirror-clone.example.json; do
         [[ -f "$doc" ]] || die "missing $doc (needed for .7z archives)"
         cp -p "$doc" "$d/"
     done
@@ -161,9 +161,9 @@ done
 NATIVE_OS="$(go env GOOS)"
 NATIVE_ARCH="$(go env GOARCH)"
 if [[ "$NATIVE_OS" == "windows" ]]; then
-    NATIVE_BIN="dist/${NATIVE_OS}-${NATIVE_ARCH}/versioner.exe"
+    NATIVE_BIN="dist/${NATIVE_OS}-${NATIVE_ARCH}/mirror-clone.exe"
 else
-    NATIVE_BIN="dist/${NATIVE_OS}-${NATIVE_ARCH}/versioner"
+    NATIVE_BIN="dist/${NATIVE_OS}-${NATIVE_ARCH}/mirror-clone"
 fi
 if [[ -x "$NATIVE_BIN" ]]; then
     NATIVE_VER="$("$NATIVE_BIN" --version)"
@@ -175,21 +175,21 @@ if [[ -x "$NATIVE_BIN" ]]; then
 fi
 
 # Pack each architecture into Versioner_<tag>_<arch>.7z (flat: binary +
-# README.md + LICENSE + versioner.example.json at archive root).
+# README.md + LICENSE + mirror-clone.example.json at archive root).
 log "packing .7z archives with $SEVENZIP..."
 archives=()
 for d in "${arch_dirs[@]}"; do
     arch="$(basename "$d")"
     bin=""
-    for cand in "${d}versioner" "${d}versioner.exe"; do
+    for cand in "${d}mirror-clone" "${d}mirror-clone.exe"; do
         [[ -f "$cand" ]] && bin="$cand"
     done
-    [[ -n "$bin" ]] || die "no versioner binary in $d"
+    [[ -n "$bin" ]] || die "no mirror-clone binary in $d"
     [[ -s "$bin" ]] || die "built binary is empty: $bin"
     bin_name="$(basename "$bin")"
     archive="dist/Versioner_${TAG}_${arch}.7z"
     rm -f "$archive"
-    (cd "$d" && "$SEVENZIP" a -t7z "../Versioner_${TAG}_${arch}.7z" "$bin_name" README.md LICENSE versioner.example.json >/dev/null)
+    (cd "$d" && "$SEVENZIP" a -t7z "../mirror-clone_${TAG}_${arch}.7z" "$bin_name" README.md LICENSE mirror-clone.example.json >/dev/null)
     [[ -s "$archive" ]] || die "failed to create $archive"
     log "  $archive:"
     "$SEVENZIP" l "$archive" | sed 's/^/release.bash:     /'
@@ -199,9 +199,9 @@ done
 # Checksums of the .7z archives (portable shasum; sha256sum fallback).
 log "generating checksums..."
 if command -v shasum >/dev/null 2>&1; then
-    (cd dist && shasum -a 256 Versioner_*.7z > checksums.txt)
+    (cd dist && shasum -a 256 mirror-clone_*.7z > checksums.txt)
 elif command -v sha256sum >/dev/null 2>&1; then
-    (cd dist && sha256sum Versioner_*.7z > checksums.txt)
+    (cd dist && sha256sum mirror-clone_*.7z > checksums.txt)
 else
     die "neither shasum nor sha256sum found (need one for checksums)"
 fi
@@ -210,26 +210,26 @@ cat dist/checksums.txt | sed 's/^/release.bash:   /'
 # --- Tag + GitHub release ----------------------------------------------
 if [[ "$DRY_RUN" -eq 1 ]]; then
     log "DRY RUN: would run:"
-    log "  git tag -a $TAG -m \"versioner $TAG\""
+    log "  git tag -a $TAG -m \"mirror-clone $TAG\""
     log "  git push origin $TAG"
-    log "  gh release create $TAG --title \"versioner $TAG\" --generate-notes dist/Versioner_*.7z dist/checksums.txt"
+    log "  gh release create $TAG --title \"mirror-clone $TAG\" --generate-notes dist/mirror-clone_*.7z dist/checksums.txt"
     log "dry run complete: VERSION=$VERSION TAG=$TAG"
     exit 0
 fi
 
 log "creating annotated tag $TAG..."
-git tag -a "$TAG" -m "versioner $TAG"
+git tag -a "$TAG" -m "mirror-clone $TAG"
 
 log "pushing tag $TAG..."
 git push origin "$TAG"
 
 if gh release view "$TAG" >/dev/null 2>&1; then
-    die "GitHub release $TAG already exists (tag was pushed; upload assets manually with: gh release upload $TAG dist/Versioner_*.7z dist/checksums.txt --clobber)"
+    die "GitHub release $TAG already exists (tag was pushed; upload assets manually with: gh release upload $TAG dist/mirror-clone_*.7z dist/checksums.txt --clobber)"
 fi
 
 log "creating GitHub release $TAG with ${#archives[@]} .7z archives + checksums..."
 gh release create "$TAG" \
-    --title "versioner $TAG" \
+    --title "mirror-clone $TAG" \
     --generate-notes \
     "${archives[@]}" dist/checksums.txt
 
