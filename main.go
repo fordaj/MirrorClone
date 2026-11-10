@@ -13,6 +13,11 @@ import (
 	"github.com/go-git/go-git/v5/plumbing"
 )
 
+// toolVersion is the released version. It is injected at build time with
+//   -ldflags "-X main.toolVersion=<tag>"
+// and defaults to "dev" for local, unstamped builds.
+var toolVersion = "dev"
+
 // rel returns the relative path of p to the current working directory.
 func rel(path string) string {
 	p, err := filepath.Abs(path)
@@ -43,13 +48,19 @@ type CloneOptions struct {
 // main entry point for the mirror-clone tool
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintf(os.Stderr, "Usage: mirror-clone [--branch NAME] REPO [DEST_DIR]\n")
+		fmt.Fprintf(os.Stderr, "Usage: mirror-clone [--branch NAME] [--version] REPO [DEST_DIR]\n")
 		os.Exit(1)
 	}
 
 	// Check for --help/-h early
 	if os.Args[1] == "--help" || os.Args[1] == "-h" {
-		fmt.Fprintf(os.Stderr, "Usage: mirror-clone [--branch NAME] REPO [DEST_DIR]\n")
+		fmt.Fprintf(os.Stderr, "Usage: mirror-clone [--branch NAME] [--version] REPO [DEST_DIR]\n")
+		os.Exit(0)
+	}
+
+	// Check for --version early
+	if os.Args[1] == "--version" {
+		fmt.Println(toolVersion)
 		os.Exit(0)
 	}
 
@@ -65,7 +76,7 @@ func main() {
 			branch = args[i+1]
 			i += 2
 		} else if args[i] == "--help" || args[i] == "-h" {
-			fmt.Fprintf(os.Stderr, "Usage: mirror-clone [--branch NAME] REPO [DEST_DIR]\n")
+			fmt.Fprintf(os.Stderr, "Usage: mirror-clone [--branch NAME] [--version] REPO [DEST_DIR]\n")
 			os.Exit(0)
 		} else if repoURL == "" {
 			repoURL = args[i]

@@ -5,19 +5,20 @@ set -euo pipefail
 # release.bash — build, archive and publish mirror-clone on GitHub.
 # ======================================================================
 #
-# The release version comes from the bundled Versioner, the archive is
-# created with the bundled 7-Zip and every message is printed by the
-# bundled Logamuffin. scripts/env.sh resolves those binaries (newest
-# bundle in tools/, falling back to PATH); scripts/entry.sh provides the
-# log() helper.
+# The release version comes from the bundled Versioner, every release
+# platform is cross-compiled with the version stamped into the binary
+# (make cross), each platform is packed into its own .7z with the
+# bundled 7-Zip, and all messages are printed by the bundled Logamuffin.
+# scripts/env.sh resolves those binaries (newest bundle in tools/,
+# falling back to PATH); scripts/entry.sh provides the log() helper.
 #
 # Usage:
 #   ./release.bash           # tag + push + GitHub release
 #   ./release.bash --dry-run # build + version only, touch nothing remote
 #
-# Prerequisites: go, git, and (for the real release) gh authenticated via
-# `gh auth login`. Working tree must be clean and the current branch
-# pushed to origin.
+# Prerequisites: go, git, make, and (for the real release) gh
+# authenticated via `gh auth login`. Working tree must be clean and the
+# current branch pushed to origin.
 # ======================================================================
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -27,7 +28,10 @@ usage() {
     cat <<'EOF'
 Usage: ./release.bash [--dry-run]
 
-Build and release mirror-clone to GitHub.
+Cross-compile mirror-clone for every release platform, pack each platform
+into MirrorClone_<tag>_<platform>.7z (binary + README.md + LICENSE), create
+an annotated tag, push it, and create a GitHub release with the .7z
+archives + checksums.
 
 Flags:
   --dry-run, -n   Build + compute the version, but do not tag/push/release.
@@ -75,7 +79,7 @@ need_tool() {
     [[ -n "$bin" && -x "$bin" ]] || die "$name binary not found or not executable: ${bin:-<unset>} (expected under ${TOOLS_DIR:-tools}/)"
 }
 
-for cmd in git go; do need_cmd "$cmd"; done
+for cmd in git go make; do need_cmd "$cmd"; done
 if [[ "$DRY_RUN" -ne 1 ]]; then
     need_cmd gh
     gh auth status >/dev/null 2>&1 || die "gh not authenticated (run: gh auth login)"
@@ -94,6 +98,7 @@ log INFO "branch: $RANCH  HEAD: $HEAD_SHORT"
 if [[ -n "$(git status --porcelain)" ]]; then
     if [[ "$DRY_RUN" -eq 1 ]]; then
         log WARNING "working tree not clean (allowed in --dry-run)"
+        git status --short | while IFS= read -r line; do log WARNING "  $line"; done
     else
         die "working tree not clean (commit or stash first)"
     fi
@@ -119,56 +124,10 @@ VERSION="$(printf '%s\n' "$VERSIONER_OUT" | sed -n 's/^VERSION=//p' | tail -n 1)
 TAG="$(printf '%s\n' "$VERSIONER_OUT" | sed -n 's/^TAG=//p' | tail -n 1)"
 [[ -n "$VERSION" ]] || die "could not parse VERSION from versioner output"
 [[ -n "$TAG" ]] || die "could not parse TAG from versioner output"
+if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    die "computed tag looks invalid: '$TAG' (expected vX.Y.Z.W.V)"
+fi
 log INFO "VERSION=$VERSION  TAG=$TAG"
-
-# --- Build mirror-clone binary --- #
-log INFO "building mirror-clone binary..."
-BIN_NAME="mirror-clone"
-if [[ "$(go env GOOS)" == "windows" ]]; then
-    BIN_NAME="mirror-clone.exe"
-fi
-
-STAGE_DIR="$REPO_ROOT/temp/release"
-rm -rf "$STAGE_DIR"
-mkdir -p "$STAGE_DIR"
-go build -o "$STAGE_DIR/$BIN_NAME" . || die "go build failed"
-chmod +x "$STAGE_DIR/$BIN_NAME"
-for doc in README.md LICENSE; do
-    [[ -f "$doc" ]] || die "missing $doc"
-    cp -p "$doc" "$STAGE_DIR/"
-done
-
-# --- Create .7z archive --- #
-ARTIFACT_DIR="$REPO_ROOT/dist"
-ARCHIVE_NAME="mirror-clone_${TAG}_${BIN_NAME%.exe}.7z"
-ARCHIVE_PATH="$ARTIFACT_DIR/$ARCHIVE_NAME"
-mkdir -p "$ARTIFACT_DIR"
-rm -f "$ARCHIVE_PATH"
-log INFO "creating $ARCHIVE_NAME with 7-Zip..."
-( cd "$STAGE_DIR" && "$SEVENZZ_BIN" a -t7z "$ARCHIVE_PATH" "$BIN_NAME" README.md LICENSE ) ||
-    die "7-Zip failed to create $ARCHIVE_NAME"
-[[ -f "$ARCHIVE_PATH" ]] || die "failed to create $ARCHIVE_PATH"
-log INFO "created $ARCHIVE_NAME"
-
-# --- Generate checksums --- #
-log INFO "generating checksums..."
-CHECKSUM_FILE="$ARTIFACT_DIR/checksums.txt"
-rm -f "$CHECKSUM_FILE"
-if command -v shasum >/dev/null 2>&1; then
-    ( cd "$ARTIFACT_DIR" && shasum -a 256 "$ARCHIVE_NAME" > checksums.txt )
-elif command -v sha256sum >/dev/null 2>&1; then
-    ( cd "$ARTIFACT_DIR" && sha256sum "$ARCHIVE_NAME" > checksums.txt )
-else
-    # Fall back to 7-Zip's hash command.
-    ARCHIVE_HASH="$("$SEVENZZ_BIN" h -scrcSHA256 "$ARCHIVE_PATH" |
-        sed -n 's/^SHA256 for data:[[:space:]]*//p' | tail -n 1)"
-    [[ -n "$ARCHIVE_HASH" ]] || die "could not compute checksum for $ARCHIVE_NAME"
-    ( cd "$ARTIFACT_DIR" && printf '%s  %s\n' "$ARCHIVE_HASH" "$ARCHIVE_NAME" > checksums.txt )
-fi
-[[ -s "$CHECKSUM_FILE" ]] || die "failed to write $CHECKSUM_FILE"
-while IFS= read -r line; do
-    log INFO "checksum: $line"
-done < "$CHECKSUM_FILE"
 
 # --- Tag checks --- #
 if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null 2>&1; then
@@ -178,10 +137,109 @@ if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; the
     die "tag $TAG exists on origin"
 fi
 
+# --- Cross-compile release binaries --- #
+log INFO "cross-compiling release binaries (VERSION=$TAG) via make cross..."
+VERSION="$TAG" make cross || die "make cross failed"
+
+# The release platforms live in the Makefile; ask it for the list so the
+# script and the build stay in sync.
+PLATFORMS=""
+while IFS= read -r platform; do
+    if [[ -n "$platform" ]]; then
+        PLATFORMS="$PLATFORMS $platform"
+    fi
+done < <(make -s platforms)
+[[ -n "$PLATFORMS" ]] || die "make platforms returned no platforms"
+
+for doc in README.md LICENSE; do
+    [[ -f "$doc" ]] || die "missing $doc (needed for the .7z archives)"
+done
+
+# --- Pack each platform into its own .7z --- #
+log INFO "packing .7z archives with 7-Zip..."
+ARTIFACT_DIR="$REPO_ROOT/dist"
+ARCHIVES=()
+for platform in $PLATFORMS; do
+    dir="$ARTIFACT_DIR/$platform"
+    [[ -d "$dir" ]] || die "no build output for platform $platform (expected $dir)"
+
+    bin=""
+    for cand in "$dir/mirror-clone" "$dir/mirror-clone.exe"; do
+        if [[ -f "$cand" ]]; then
+            bin="$cand"
+        fi
+    done
+    [[ -n "$bin" ]] || die "no mirror-clone binary in $dir"
+    [[ -s "$bin" ]] || die "built binary is empty: $bin"
+    bin_name="$(basename "$bin")"
+
+    # Stage the user docs next to the binary so they land at the
+    # archive root.
+    for doc in README.md LICENSE; do
+        cp -p "$doc" "$dir/"
+    done
+
+    archive="$ARTIFACT_DIR/MirrorClone_${TAG}_${platform}.7z"
+    rm -f "$archive"
+    ( cd "$dir" && "$SEVENZZ_BIN" a -t7z "$archive" "$bin_name" README.md LICENSE >/dev/null ) ||
+        die "7-Zip failed to create $(basename "$archive")"
+    [[ -s "$archive" ]] || die "failed to create $archive"
+    log INFO "  $(basename "$archive")"
+    ARCHIVES+=("$archive")
+done
+
+# The native binary must report the release tag (guards the ldflags
+# wiring in the Makefile).
+NATIVE_PLATFORM="${RECIPE_SERVER_PLATFORM:-}"
+NATIVE_BIN=""
+if [[ -n "$NATIVE_PLATFORM" ]]; then
+    if [[ "$(go env GOOS)" == "windows" ]]; then
+        NATIVE_BIN="$ARTIFACT_DIR/$NATIVE_PLATFORM/mirror-clone.exe"
+    else
+        NATIVE_BIN="$ARTIFACT_DIR/$NATIVE_PLATFORM/mirror-clone"
+    fi
+fi
+if [[ -n "$NATIVE_BIN" && -x "$NATIVE_BIN" ]]; then
+    NATIVE_VER="$("$NATIVE_BIN" --version)"
+    log INFO "native binary ($NATIVE_PLATFORM) reports: $NATIVE_VER"
+    case "$NATIVE_VER" in
+        *"$TAG"*) ;;
+        *) die "native binary version '$NATIVE_VER' does not contain $TAG (ldflags missing?)" ;;
+    esac
+fi
+
+# --- Generate checksums --- #
+log INFO "generating checksums..."
+CHECKSUM_FILE="$ARTIFACT_DIR/checksums.txt"
+rm -f "$CHECKSUM_FILE"
+ARCHIVE_NAMES=()
+for archive in "${ARCHIVES[@]}"; do
+    ARCHIVE_NAMES+=("$(basename "$archive")")
+done
+if command -v shasum >/dev/null 2>&1; then
+    ( cd "$ARTIFACT_DIR" && shasum -a 256 "${ARCHIVE_NAMES[@]}" > checksums.txt )
+elif command -v sha256sum >/dev/null 2>&1; then
+    ( cd "$ARTIFACT_DIR" && sha256sum "${ARCHIVE_NAMES[@]}" > checksums.txt )
+else
+    # Fall back to 7-Zip's hash command.
+    : > "$CHECKSUM_FILE"
+    for archive in "${ARCHIVES[@]}"; do
+        name="$(basename "$archive")"
+        hash="$("$SEVENZZ_BIN" h -scrcSHA256 "$archive" |
+            sed -n 's/^SHA256 for data:[[:space:]]*//p' | tail -n 1)"
+        [[ -n "$hash" ]] || die "could not compute checksum for $name"
+        printf '%s  %s\n' "$hash" "$name" >> "$CHECKSUM_FILE"
+    done
+fi
+[[ -s "$CHECKSUM_FILE" ]] || die "failed to write $CHECKSUM_FILE"
+while IFS= read -r line; do
+    log INFO "checksum: $line"
+done < "$CHECKSUM_FILE"
+
 # --- Tag + GitHub release --- #
 if [[ "$DRY_RUN" -eq 1 ]]; then
     log INFO "DRY RUN: not tagging, pushing or creating a release"
-    log INFO "would publish $ARCHIVE_NAME (version $VERSION)"
+    log INFO "would publish ${#ARCHIVES[@]} archive(s) for version $VERSION"
     exit 0
 fi
 
@@ -192,13 +250,13 @@ log INFO "pushing tag $TAG..."
 git push origin "$TAG"
 
 if gh release view "$TAG" >/dev/null 2>&1; then
-    die "release $TAG exists"
+    die "release $TAG exists (upload the assets manually with: gh release upload $TAG ${ARCHIVE_NAMES[*]} --clobber)"
 fi
 
 log INFO "creating GitHub release $TAG..."
 gh release create "$TAG" \
     --title "mirror-clone $TAG" \
-    --generate-notes "dist/$ARCHIVE_NAME" "dist/checksums.txt"
+    --generate-notes "${ARCHIVES[@]}" "dist/checksums.txt"
 
 REPO_SLUG="$(gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null || true)"
 if [[ -n "$REPO_SLUG" ]]; then
